@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Take Selfie</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:#0d0f14;color:#e8eaf0;
+    font-family:'Segoe UI',sans-serif;
+    min-height:100vh;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;
+    padding:20px;gap:16px;
+  }
+  .title{font-size:18px;font-weight:700;letter-spacing:1px;text-align:center}
+  .sub{font-size:12px;color:#8892a4;text-align:center;line-height:1.6}
+  .cam-box{
+    width:100%;max-width:380px;aspect-ratio:3/4;
+    background:#1c2030;border:2px solid #252a3a;border-radius:14px;
+    overflow:hidden;display:flex;align-items:center;justify-content:center;position:relative;
+  }
+  #video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);display:none}
+  #canvas{width:100%;height:100%;object-fit:cover;display:none}
+  .placeholder{text-align:center;color:#505868;padding:20px}
+  .placeholder .icon{font-size:48px;margin-bottom:8px}
+  .placeholder p{font-size:13px}
+  .face-guide{
+    position:absolute;top:50%;left:50%;transform:translate(-50%,-55%);
+    width:160px;height:200px;border:2px dashed rgba(59,130,246,.5);
+    border-radius:50%;pointer-events:none;display:none;
+  }
+  .face-guide.show{display:block}
+  .live-tag{
+    position:absolute;top:10px;left:10px;background:rgba(0,0,0,.7);
+    border:1px solid rgba(255,255,255,.1);border-radius:4px;padding:3px 8px;
+    font-size:11px;color:#10b981;display:none;align-items:center;gap:4px;
+  }
+  .live-tag.show{display:flex}
+  .rec{width:6px;height:6px;border-radius:50%;background:#10b981;animation:blink 1s infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+  .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .1s}
+  .flash.on{opacity:1}
+  .btns{display:flex;gap:10px;width:100%;max-width:380px;flex-wrap:wrap}
+  .btn{
+    flex:1;padding:14px;border-radius:10px;border:none;
+    font-size:15px;font-weight:600;cursor:pointer;transition:all .2s;
+    min-width:130px;
+  }
+  .btn-start{background:#3b82f6;color:#fff}
+  .btn-capture{background:#10b981;color:#fff;display:none}
+  .btn-retake{background:#1c2030;color:#e8eaf0;border:1px solid #252a3a;display:none}
+  .btn-use{background:#10b981;color:#fff;display:none}
+  .status{font-size:12px;color:#8892a4;text-align:center;min-height:20px;padding:0 10px;line-height:1.5}
+  .status.ok{color:#10b981}
+  .status.err{color:#ef4444}
+
+  /* Fallback */
+  .fallback-section{
+    display:none;width:100%;max-width:380px;
+    background:#1c2030;border:1px solid #252a3a;border-radius:12px;
+    padding:20px;text-align:center;gap:12px;flex-direction:column;align-items:center;
+  }
+  .fallback-section.show{display:flex}
+  .fallback-section p{font-size:13px;color:#8892a4;line-height:1.6}
+  #nativeInput{display:none}
+  .btn-native{
+    background:#f59e0b;color:#fff;border:none;
+    padding:14px 24px;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;width:100%;
+  }
+  #nativePreview{
+    width:100%;max-width:380px;border-radius:12px;
+    display:none;border:2px solid #10b981;
+  }
+</style>
+</head>
+<body>
+
+<div class="title">📷 Take Your Selfie</div>
+<div class="sub">Apna chehra oval mein rakho<br/>aur Capture dabao</div>
+
+<!-- Main camera UI -->
+<div class="cam-box" id="camBox">
+  <div class="placeholder" id="placeholder">
+    <div class="icon">🤳</div>
+    <p>Start Camera dabao</p>
+  </div>
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+  <div class="face-guide" id="faceGuide"></div>
+  <div class="live-tag" id="liveTag"><span class="rec"></span> LIVE</div>
+  <div class="flash" id="flash"></div>
+</div>
+
+<div class="btns" id="mainBtns">
+  <button class="btn btn-start"   id="btnStart"   onclick="startCam()">📷 Start Camera</button>
+  <button class="btn btn-capture" id="btnCapture" onclick="capture()">✓ Capture</button>
+  <button class="btn btn-retake"  id="btnRetake"  onclick="retake()">↺ Retake</button>
+  <button class="btn btn-use"     id="btnUse"     onclick="usePhoto()">✅ Use This Photo</button>
+</div>
+
+<!-- Fallback -->
+<div class="fallback-section" id="fallbackSection">
+  <p>📱 Live camera is not supported on your browser.<br/>
+     Neeche button se phone ka camera open karo aur selfie lo.</p>
+  <input type="file" id="nativeInput" accept="image/*" capture="user" onchange="nativePhotoSelected(event)"/>
+  <button class="btn-native" onclick="document.getElementById('nativeInput').click()">
+    📷 Open Phone Camera
+  </button>
+</div>
+
+<img id="nativePreview" alt="Your photo"/>
+
+<div class="status" id="status">Camera start karne ke liye button dabao...</div>
+
+<script>
+var stream    = null;
+var photoData = null;
+
+// ── FIX: Apps Script ka exact origin
+// script.google.com ke saath saath deployed URL bhi cover karta hai
+var ALLOWED_ORIGINS = [
+  "https://script.google.com",
+  "https://n-XXXXXXXXXXXXXXXXXXXXXX.googleusercontent.com"  // optional extra origin
+];
+
+// ── Postmessage target — Apps Script window
+// FIX: "*" use karte hain kyunki Apps Script runtime URL dynamic hoti hai
+// Security: sirf CAMERA_PHOTO type message hi bhejte hain, koi sensitive data nahi
+var POST_TARGET = "*";
+
+function startCam() {
+  setStatus('Camera permission maang raha hai...', '');
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showFallback();
+    return;
+  }
+
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 960 } }
+  })
+  .then(function(s) {
+    stream = s;
+    var v = document.getElementById('video');
+    v.srcObject = s;
+    v.style.display = 'block';
+    document.getElementById('placeholder').style.display = 'none';
+    document.getElementById('faceGuide').classList.add('show');
+    document.getElementById('liveTag').classList.add('show');
+    document.getElementById('btnStart').style.display   = 'none';
+    document.getElementById('btnCapture').style.display = 'block';
+    setStatus('✅ Camera ready — chehra oval mein rakho aur capture karo', 'ok');
+  })
+  .catch(function(err) {
+    console.log('Camera error:', err.name, err.message);
+    showFallback();
+  });
+}
+
+function showFallback() {
+  document.getElementById('camBox').style.display      = 'none';
+  document.getElementById('mainBtns').style.display    = 'none';
+  document.getElementById('fallbackSection').classList.add('show');
+  setStatus('📱 Native camera mode active', 'ok');
+}
+
+function capture() {
+  var v   = document.getElementById('video');
+  var c   = document.getElementById('canvas');
+  var ctx = c.getContext('2d');
+  c.width  = v.videoWidth  || 720;
+  c.height = v.videoHeight || 960;
+  ctx.translate(c.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(v, 0, 0);
+  photoData = c.toDataURL('image/jpeg', 0.8);
+
+  // Flash effect
+  var fl = document.getElementById('flash');
+  fl.classList.add('on');
+  setTimeout(function(){ fl.classList.remove('on'); }, 150);
+
+  c.style.display = 'block';
+  v.style.display = 'none';
+  document.getElementById('faceGuide').classList.remove('show');
+  document.getElementById('liveTag').classList.remove('show');
+  if (stream) stream.getTracks().forEach(function(t){ t.stop(); });
+
+  document.getElementById('btnCapture').style.display = 'none';
+  document.getElementById('btnRetake').style.display  = 'block';
+  document.getElementById('btnUse').style.display     = 'block';
+  setStatus('✅ Photo liya! Achha laga? Use karo ya retake lo.', 'ok');
+}
+
+function retake() {
+  photoData = null;
+  document.getElementById('canvas').style.display      = 'none';
+  document.getElementById('placeholder').style.display = 'flex';
+  document.getElementById('btnRetake').style.display   = 'none';
+  document.getElementById('btnUse').style.display      = 'none';
+  document.getElementById('btnStart').style.display    = 'block';
+  setStatus('Dobara lene ke liye Start Camera dabao', '');
+  startCam();
+}
+
+function nativePhotoSelected(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    photoData = e.target.result;
+    var prev = document.getElementById('nativePreview');
+    prev.src = photoData;
+    prev.style.display = 'block';
+
+    // Use button dynamically add
+    var existing = document.getElementById('dynamicUseBtn');
+    if (!existing) {
+      var useBtn = document.createElement('button');
+      useBtn.id        = 'dynamicUseBtn';
+      useBtn.className = 'btn-native';
+      useBtn.style.background = '#10b981';
+      useBtn.style.marginTop  = '12px';
+      useBtn.textContent = '✅ Use This Photo';
+      useBtn.onclick = usePhoto;
+      document.getElementById('fallbackSection').appendChild(useBtn);
+    }
+    setStatus('✅ Photo ready! "Use This Photo" dabao.', 'ok');
+  };
+  reader.readAsDataURL(file);
+}
+
+function usePhoto() {
+  if (!photoData) {
+    setStatus('❌ Pehle photo lo!', 'err');
+    return;
+  }
+
+  // FIX: window.opener || window.parent — dono try karo
+  var target = window.opener || (window.parent !== window ? window.parent : null);
+
+  if (target) {
+    // FIX: "*" use karte hain — Apps Script ka runtime origin dynamic hota hai
+    target.postMessage({ type: 'CAMERA_PHOTO', photo: photoData }, POST_TARGET);
+    setStatus('✅ Photo bhej diya! Ye window band ho rahi hai...', 'ok');
+    setTimeout(function(){ window.close(); }, 1200);
+  } else {
+    // FIX: Agar opener nahi mila — localStorage fallback
+    try {
+      localStorage.setItem('pending_photo', photoData);
+      setStatus('✅ Photo save ho gayi! Main window mein wapas jao.', 'ok');
+      setTimeout(function(){ window.close(); }, 1500);
+    } catch(e) {
+      setStatus('❌ Parent window nahi mila. Popup se kholo.', 'err');
+    }
+  }
+}
+
+function setStatus(msg, cls) {
+  var el = document.getElementById('status');
+  el.textContent = msg;
+  el.className   = 'status' + (cls ? ' ' + cls : '');
+}
+
+// Auto-start camera on page load
+window.onload = function() { startCam(); };
+</script>
+</body>
+</html>
